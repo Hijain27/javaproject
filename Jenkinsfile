@@ -123,7 +123,7 @@ pipeline {
             }
         }
        
-       stage('Run the docker container'){
+       stage('Run the docker container on dev'){
          when {
                 branch 'dev'
               }
