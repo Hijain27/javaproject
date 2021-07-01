@@ -27,8 +27,8 @@ pipeline {
     }
     
     
- stages {
-      stage('Initial Notification') {
+    stages {
+       stage('Initial Notification') {
             steps {                 
               echo 'Pipeline Start Notification'
             }
