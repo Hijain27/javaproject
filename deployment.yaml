@@ -19,7 +19,7 @@ spec:
    - name: myapp
      image: hijain27/dotnetrepo:tagversion
      ports:
-     - containerPort: 8080
+     - containerPort: 8082
 
 ---
 apiVersion: v1
@@ -33,4 +33,4 @@ spec:
   ports:
     - protocol: TCP
       port: 80
-      targetPort: 8080
+      targetPort: 8082
