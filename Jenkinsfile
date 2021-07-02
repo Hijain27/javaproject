@@ -1,136 +1,71 @@
 pipeline {
     agent any
- 
-   tools
-    {
-       maven "Maven"
-
-    }
-    environment {
-        // This can be nexus3 or nexus2
-        NEXUS_VERSION = "nexus3"
-        // This can be http or https
-        NEXUS_PROTOCOL = "http"
-        // Where your Nexus is running
-        NEXUS_URL = "localhost:8081"
-        // Repository where we will upload the artifact
-        NEXUS_REPOSITORY = "repositary-example"
-        // Jenkins credential id to authenticate to Nexus OSS
-        NEXUS_CREDENTIAL_ID = "nexus-credentials"
-        
-        registryCredential = "Docker-cred"
-        registry ="localhost:9001"
-        DockerImage= ''
-        imagename = 'firstweb/latest'
-        
-        
-    }
-    
-    
+	tools {
+		maven 'Maven'
+	}
+	
+	environment {
+		PROJECT_ID = 'jenkins-296812'
+                CLUSTER_NAME = 'k8s-cluster'
+                LOCATION = 'us-central1-c'
+                CREDENTIALS_ID = 'kubernetes'		
+	}
+	
     stages {
-       stage('Initial Notification') {
-            steps {                 
-              echo 'Pipeline Start Notification'
-            }
-        }
-   
-        stage('SonarQube analysis 1') {
-            steps {
-                withSonarQubeEnv('Sonarqube'){
-                sh 'mvn clean package sonar:sonar -X'
-            }
-          }
-        }
-        
-        stage("Quality Gate 1") {
-            steps {
-                waitForQualityGate abortPipeline: true
-            }
-        }
-        stage("publish to nexus") {
-            steps {
-                script {
-                    // Read POM xml file using 'readMavenPom' step , this step 'readMavenPom' is included in: https://plugins.jenkins.io/pipeline-utility-steps
-                    pom = readMavenPom file: "pom.xml";
-                    // Find built artifact under target folder
-                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
-                    // Print some info from the artifact found
-                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
-                    // Extract the path from the File found
-                    artifactPath = filesByGlob[0].path;
-                    // Assign to a boolean response verifying If the artifact name exists
-                    artifactExists = fileExists artifactPath;
-
-                    if(artifactExists) {
-                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
-
-                        nexusArtifactUploader(
-                            nexusVersion: NEXUS_VERSION,
-                            protocol: NEXUS_PROTOCOL,
-                            nexusUrl: NEXUS_URL,
-                            groupId: pom.groupId,
-                            version: pom.version,
-                            repository: NEXUS_REPOSITORY,
-                            credentialsId: NEXUS_CREDENTIAL_ID,
-                            artifacts: [
-                                // Artifact generated such as .jar, .ear and .war files.
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: artifactPath,
-                                type: pom.packaging],
-
-                                // Lets upload the pom.xml file for additional information for Transitive dependencies
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: "pom.xml",
-                                type: "pom"]
-                            ]
-                        );
-
-                    } else {
-                        error "*** File: ${artifactPath}, could not be found";
-                    }
-                }
-             }
-             }
-        stage('Docker Build & Tag') {
-       
-           steps {
-                script {
-               dockerImage = docker.build imagename 
-                //sh 'docker tag samplewebapp nikhilnidhi/samplewebapp:$BUILD_NUMBER'
-               
-                }
-          }
-        }
-        stage('Publish image to Docker Hub') {
-             steps {
-                script {
-                  docker.withRegistry( 'http://'+registry, registryCredential) {
-                  dockerImage.push("$BUILD_NUMBER")
-                  dockerImage.push('latest')
-                 }		
-        	}
-        }
-  }
-   
-       stage('Run the docker container'){
-         when {
-                branch 'main'
-              }
-            steps{
-                sh "docker run -d -p 8005:8080 firstweb/latest"
-            }
-        }
-       
-       stage('Run the docker container on dev'){
-         when {
-                branch 'dev'
-              }
-            steps{
-                sh "docker run -d -p 8008:8080 firstweb/latest"
-            }
-        }
-   
-  }
+	    stage('Scm Checkout') {
+		    steps {
+			    checkout scm
+		    }
+	    }
+	    
+	    stage('Build') {
+		    steps {
+			    sh 'mvn clean package'
+		    }
+	    }
+	    
+	    stage('Test') {
+		    steps {
+			    echo "Testing..."
+			    sh 'mvn test'
+		    }
+	    }
+	    
+	    stage('Build Docker Image') {
+		    steps {
+			    sh 'whoami'
+			    script {
+				    myimage = docker.build("ameintu/devops:${env.BUILD_ID}")
+			    }
+		    }
+	    }
+	    
+	    stage("Push Docker Image") {
+		    steps {
+			    script {
+				    echo "Push Docker Image"
+				    withCredentials([string(credentialsId: 'dockerhub', variable: 'dockerhub')]) {
+            				sh "docker login -u ameintu -p ${dockerhub}"
+				    }
+				        myimage.push("${env.BUILD_ID}")
+				    
+			    }
+		    }
+	    }
+	    
+	    stage('Deploy to K8s') {
+		    steps{
+			    echo "Deployment started ..."
+			    sh 'ls -ltr'
+			    sh 'pwd'
+			    sh "sed -i 's/tagversion/${env.BUILD_ID}/g' serviceLB.yaml"
+				sh "sed -i 's/tagversion/${env.BUILD_ID}/g' deployment.yaml"
+			    echo "Start deployment of serviceLB.yaml"
+			    step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'serviceLB.yaml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: true])
+				echo "Start deployment of deployment.yaml"
+				step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'deployment.yaml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: true])
+			    echo "Deployment Finished ..."
+		    }
+	    }
+    }
 }
