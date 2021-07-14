@@ -13,6 +13,7 @@ pipeline {
             script{
             pipelineconfig_chkout()
             checkout scm
+            sname = name.toLowerCase()
             }
       }
 }
