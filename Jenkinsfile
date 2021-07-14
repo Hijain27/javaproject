@@ -1,3 +1,4 @@
+def service = ServiceHelper.getService("${name}")
 pipeline {
     agent any
 	    environment {
